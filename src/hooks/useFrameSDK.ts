@@ -1,108 +1,84 @@
-import { useCallback, useEffect, useState } from "react";
-import sdk from "@farcaster/frame-sdk";
-import { useAccount } from "wagmi";
-import { useRouter } from "next/navigation";
-import { FrameContext, FrameNotificationDetails } from "@farcaster/frame-node";
+import { useEffect, useState } from "react";
 
+// Define the Frame SDK context type
+export type FrameContext = {
+  fid?: number;
+  url?: string;
+  messageHash?: string;
+  timestamp?: number;
+  network?: number;
+  buttonIndex?: number;
+  inputText?: string;
+  castId?: {
+    fid: number;
+    hash: string;
+  };
+};
+
+// Define the Frame SDK type
+export type FrameSDK = {
+  context: Promise<FrameContext>;
+  actions: {
+    ready: () => void;
+    close: () => void;
+    openUrl: (url: string) => void;
+  };
+};
+
+// Hook to access the Frame SDK
 export function useFrameSDK() {
-  const router = useRouter();
-  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
-
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
-  const [isInFrame, setIsInFrame] = useState(false);
-  const [context, setContext] = useState<FrameContext>();
-  const [isFramePinned, setIsFramePinned] = useState(false);
-  const [notificationDetails, setNotificationDetails] =
-    useState<FrameNotificationDetails | null>(null);
-  const [lastEvent, setLastEvent] = useState("");
-  const [pinFrameResponse, setPinFrameResponse] = useState("");
+  const [context, setContext] = useState<FrameContext | null>(null);
+  const [sdk, setSDK] = useState<FrameSDK | null>(null);
 
   useEffect(() => {
-    const load = async () => {
-      console.log("LOAD", sdk.context);
-      const frameContext = await sdk.context;
-
-      if (!frameContext) {
-        // has no frameContext from Farcaster
-        return;
-      }
-
-      setContext(frameContext as unknown as FrameContext);
-      setIsFramePinned(frameContext.client.added);
-
-      sdk.on("frameAdded", ({ notificationDetails }) => {
-        setLastEvent(
-          `frameAdded${notificationDetails ? ", notifications enabled" : ""}`,
-        );
-        setIsFramePinned(true);
-        if (notificationDetails) setNotificationDetails(notificationDetails);
-      });
-
-      sdk.on("frameAddRejected", ({ reason }) => {
-        setLastEvent(`frameAddRejected, reason ${reason}`);
-      });
-
-      sdk.on("frameRemoved", () => {
-        setLastEvent("frameRemoved");
-        setIsFramePinned(false);
-        setNotificationDetails(null);
-      });
-
-      sdk.on("notificationsEnabled", ({ notificationDetails }) => {
-        setLastEvent("notificationsEnabled");
-        setNotificationDetails(notificationDetails);
-      });
-
-      sdk.on("notificationsDisabled", () => {
-        setLastEvent("notificationsDisabled");
-        setNotificationDetails(null);
-      });
-
-      sdk.actions.ready();
-    };
-
-    if (sdk && !isSDKLoaded) {
-      setIsSDKLoaded(true);
-      load();
-      return () => {
-        sdk.removeAllListeners();
-      };
-    }
-  }, [isSDKLoaded]);
-
-  const pinFrame = useCallback(async () => {
-    try {
-      setNotificationDetails(null);
-
-      const result = await sdk.actions.addFrame();
-      console.log("addFrame result", result);
-      // @ts-expect-error - result type mixup
-      if (result.added) {
-        if (result.notificationDetails) {
-          setNotificationDetails(result.notificationDetails);
+    // Check if we're in a Farcaster client environment
+    const isFarcasterClient = typeof window !== "undefined" && "frameContext" in window;
+    
+    if (isFarcasterClient) {
+      // @ts-expect-error - Access the global frameContext
+      const frameSDK = window.frameContext as FrameSDK;
+      setSDK(frameSDK);
+      
+      const initializeSDK = async () => {
+        try {
+          const ctx = await frameSDK.context;
+          setContext(ctx);
+          frameSDK.actions.ready();
+          setIsSDKLoaded(true);
+        } catch (error) {
+          console.error("Error initializing Frame SDK:", error);
         }
-        setPinFrameResponse(
-          result.notificationDetails
-            ? `Added, got notificaton token ${result.notificationDetails.token} and url ${result.notificationDetails.url}`
-            : "Added, got no notification details",
-        );
-      }
-    } catch (error) {
-      setPinFrameResponse(`Error: ${error}`);
+      };
+      
+      initializeSDK();
+    } else {
+      // Mock SDK for development outside Farcaster client
+      const mockSDK: FrameSDK = {
+        context: Promise.resolve({
+          fid: 1,
+          url: "https://example.com/frame",
+          timestamp: Date.now(),
+          network: 1,
+        }),
+        actions: {
+          ready: () => console.log("Frame ready"),
+          close: () => console.log("Frame closed"),
+          openUrl: (url) => console.log("Opening URL:", url),
+        },
+      };
+      
+      setSDK(mockSDK);
+      
+      const initMockSDK = async () => {
+        const ctx = await mockSDK.context;
+        setContext(ctx);
+        setIsSDKLoaded(true);
+      };
+      
+      initMockSDK();
     }
   }, []);
 
-  return {
-    context,
-    pinFrame,
-    pinFrameResponse,
-    isFramePinned,
-    notificationDetails,
-    lastEvent,
-    sdk,
-    isSDKLoaded,
-    isAuthDialogOpen,
-    setIsAuthDialogOpen,
-    isInFrame,
-  };
+  return { isSDKLoaded, sdk, context };
 }
